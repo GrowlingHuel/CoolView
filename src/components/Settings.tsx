@@ -7,9 +7,6 @@ interface SettingsProps {
   onClose: () => void;
 }
 
-const W = 238;
-const H = 460;
-
 const inputStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.07)",
   border: "1px solid rgba(255,255,255,0.12)",
@@ -65,6 +62,9 @@ const btn = (primary?: boolean): React.CSSProperties => ({
 export function Settings({ config, onSave, onClose }: SettingsProps) {
   const [draft, setDraft] = useState<Config>(JSON.parse(JSON.stringify(config)));
 
+  const isBottom = config.display.position === "bottom-left" ||
+                   config.display.position === "bottom-right";
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Enter")  { e.preventDefault(); onSave(draft); }
@@ -84,28 +84,29 @@ export function Settings({ config, onSave, onClose }: SettingsProps) {
     setDraft(d => ({ ...d, monitor: { ...d.monitor, [k]: v } }));
   }
 
-  return (
-    // Hardcoded pixel dimensions — no viewport, no parent, no surprises
-    <div style={{
-      position: "absolute",
-      top: 0,
-      left: 0,
-      width: W,
-      height: H,
-      background: "rgba(14, 14, 20, 0.97)",
-      backdropFilter: "blur(20px)",
-      WebkitBackdropFilter: "blur(20px)",
-      border: "1px solid rgba(255,255,255,0.1)",
-      borderRadius: 10,
-      padding: "12px 14px",
-      color: "rgba(220,220,230,0.9)",
-      fontSize: 12,
-      fontFamily: "var(--font)",
-      display: "flex",
-      flexDirection: "column" as const,
-      boxSizing: "border-box" as const,
-    }}>
+  const panelStyle: React.CSSProperties = {
+    position: "absolute",
+    // Mirror the HUD anchor: bottom positions attach panel to bottom of window,
+    // top positions attach to top. Settings always grows toward the centre of screen.
+    ...(isBottom ? { bottom: 0 } : { top: 0 }),
+    left: 0,
+    width: 238,
+    background: "rgba(14, 14, 20, 0.97)",
+    backdropFilter: "blur(20px)",
+    WebkitBackdropFilter: "blur(20px)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 10,
+    padding: "12px 14px",
+    color: "rgba(220,220,230,0.9)",
+    fontSize: 12,
+    fontFamily: "var(--font)",
+    display: "flex",
+    flexDirection: "column" as const,
+    boxSizing: "border-box" as const,
+  };
 
+  const content = (
+    <>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.45)" }}>
@@ -186,7 +187,8 @@ export function Settings({ config, onSave, onClose }: SettingsProps) {
         <button style={btn()} onClick={onClose}>Cancel</button>
         <button style={btn(true)} onClick={() => onSave(draft)}>Save</button>
       </div>
-
-    </div>
+    </>
   );
+
+  return <div style={panelStyle}>{content}</div>;
 }

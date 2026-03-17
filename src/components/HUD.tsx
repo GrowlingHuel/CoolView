@@ -45,7 +45,12 @@ function tempColor(celsius: number | null | undefined): string {
 
 export function HUD({ temps, config, isWarning, onOpenSettings, hidden }: HUDProps) {
   const [hovered, setHovered] = useState(false);
-  const { unit, show_sparkline } = config.display;
+  const { unit, show_sparkline, position } = config.display;
+
+  // When at the bottom of the screen, anchor content to the bottom of the
+  // transparent window so the HUD text sits near the taskbar as expected.
+  // The empty transparent space above is where settings will expand into.
+  const isBottom = position === "bottom-left" || position === "bottom-right";
 
   function handleMouseDown(e: React.MouseEvent) {
     if (e.button !== 0) return;
@@ -93,7 +98,7 @@ export function HUD({ temps, config, isWarning, onOpenSettings, hidden }: HUDPro
   if (hidden) return null;
 
   return (
-    // Fill the entire transparent window so drag and hover work everywhere
+    // Full transparent window — drag/hover works everywhere
     <div
       style={{
         position: "absolute",
@@ -107,16 +112,19 @@ export function HUD({ temps, config, isWarning, onOpenSettings, hidden }: HUDPro
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Content anchored to top-right */}
+      {/* Content anchored to whichever corner matches position config */}
       <div style={{
         position: "absolute",
-        top: 8,
+        // Vertical anchor: top of window for top positions, bottom for bottom positions
+        ...(isBottom ? { bottom: 8 } : { top: 8 }),
+        // Horizontal anchor: always right-align content
         right: 10,
         display: "flex",
-        flexDirection: "column",
+        flexDirection: isBottom ? "column-reverse" : "column",
         alignItems: "flex-end",
         gap: 3,
       }}>
+
         {/* Gear — always faintly visible, brightens on hover */}
         <button
           style={{
