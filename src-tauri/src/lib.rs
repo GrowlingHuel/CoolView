@@ -109,10 +109,19 @@ fn position_window<R: Runtime>(window: &WebviewWindow<R>, position: &str) {
         let w      = win_size.width;
         let h      = win_size.height;
         let (x, y) = match position {
-            "top-left"     => (pad as i32,                        pad as i32),
-            "bottom-right" => ((screen.width - w - pad) as i32,  (screen.height - h - pad) as i32),
-            "bottom-left"  => (pad as i32,                        (screen.height - h - pad) as i32),
-            _              => ((screen.width - w - pad) as i32,   pad as i32),
+            "top-left"     => (pad as i32, pad as i32),
+            "bottom-right" => (
+                screen.width.saturating_sub(w + pad) as i32,
+                screen.height.saturating_sub(h + pad) as i32,
+            ),
+            "bottom-left"  => (
+                pad as i32,
+                screen.height.saturating_sub(h + pad) as i32,
+            ),
+            _              => (
+                screen.width.saturating_sub(w + pad) as i32,
+                pad as i32,
+            ),
         };
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }

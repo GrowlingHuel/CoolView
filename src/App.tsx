@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { currentMonitor } from "@tauri-apps/api/window";
 import { HUD } from "./components/HUD";
 import { Settings } from "./components/Settings";
 import { History } from "./components/History";
@@ -27,34 +26,18 @@ export default function App() {
   const [isWarning,    setIsWarning]    = useState(false);
   const [isBottom,     setIsBottom]     = useState(false);
 
-  // Single source of truth for isBottom — driven by actual window position via onMoved
-  useEffect(() => {
+  // Detect which half of screen the window is in — checked when panels open
+  // (not using onMoved as it causes XCB threading issues on Linux/GTK)
+  async function refreshIsBottom() {
     const win = getCurrentWebviewWindow();
+    const [monitor, pos] = await Promise.all([
+      win.currentMonitor(),
+      win.outerPosition(),
+    ]);
+    if (monitor) setIsBottom(pos.y > monitor.size.height / 2);
+  }
 
-    async function checkPosition() {
-      const [monitor, pos] = await Promise.all([
-        currentMonitor(),
-        win.outerPosition(),
-      ]);
-      if (monitor) {
-        setIsBottom(pos.y > monitor.size.height / 2);
-      }
-    }
-
-    // Check on mount
-    checkPosition().catch(console.error);
-
-    // Re-check every time the window is moved — this is the official Tauri API for this
-    let unlisten: (() => void) | undefined;
-    win.onMoved(async ({ payload: pos }) => {
-      const monitor = await currentMonitor();
-      if (monitor) {
-        setIsBottom(pos.y > monitor.size.height / 2);
-      }
-    }).then(fn => { unlisten = fn; }).catch(console.error);
-
-    return () => { unlisten?.(); };
-  }, []);
+  useEffect(() => { refreshIsBottom().catch(console.error); }, []);
 
   useEffect(() => { fetchConfig().then(setConfig).catch(console.error); }, []);
 
@@ -93,8 +76,8 @@ export default function App() {
         config={config}
         isWarning={isWarning}
         isBottom={isBottom}
-        onOpenSettings={() => setView("settings")}
-        onOpenHistory={() => setView("history")}
+        onOpenSettings={() => { refreshIsBottom().catch(console.error); setView("settings"); }}
+        onOpenHistory={() => { refreshIsBottom().catch(console.error); setView("history"); }}
       />
       {view === "settings" && (
         <Settings
@@ -102,7 +85,7 @@ export default function App() {
           isBottom={isBottom}
           onSave={handleSaveConfig}
           onClose={() => setView("hud")}
-          onOpenHistory={() => setView("history")}
+          onOpenHistory={() => { refreshIsBottom().catch(console.error); setView("history"); }}
         />
       )}
       {view === "history" && (
