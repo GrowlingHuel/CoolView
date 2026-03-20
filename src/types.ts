@@ -4,6 +4,7 @@ export interface TempPayload {
   motherboard: number | null;
   is_warning: boolean;
   history: number[];
+  top_processes: ProcessInfo[];
 }
 
 export interface Config {
@@ -32,9 +33,16 @@ export interface MonitorConfig {
   motherboard: boolean;
 }
 
+export interface ProcessInfo {
+  name: string;
+  cpu_percent: number;
+  pid: number;
+}
+
 export interface HistoryEntry {
   timestamp: string;      // "2026-03-17T14:23:45"
   cpu: number;
   gpu: number | null;
   motherboard: number | null;
+  top_processes: ProcessInfo[];
 }

@@ -2,18 +2,12 @@ mod config;
 mod monitor;
 mod sensors;
 
-use std::{
-    fs,
-    io::Write,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
+use std::{fs, io::Write, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 use chrono::{Duration as ChronoDuration, Local};
 use config::Config;
 use monitor::Monitor;
 use sensors::SensorReader;
+use sysinfo::{System, ProcessesToUpdate};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -21,55 +15,31 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow,
 };
 
-struct AppState {
-    config: Config,
-    monitor: Monitor,
-}
-
+struct AppState { config: Config, monitor: Monitor, visible: bool }
 type SharedState = Arc<Mutex<AppState>>;
 
 #[derive(Clone, Serialize, Deserialize)]
+struct ProcessInfo { name: String, cpu_percent: f32, pid: u32 }
+
+#[derive(Clone, Serialize, Deserialize)]
 struct TempPayload {
-    cpu: f32,
-    gpu: Option<f32>,
-    motherboard: Option<f32>,
-    is_warning: bool,
-    history: Vec<f32>,
+    cpu: f32, gpu: Option<f32>, motherboard: Option<f32>,
+    is_warning: bool, history: Vec<f32>, top_processes: Vec<ProcessInfo>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct HistoryEntry {
-    timestamp: String,
-    cpu: f32,
-    gpu: Option<f32>,
-    motherboard: Option<f32>,
+    timestamp: String, cpu: f32, gpu: Option<f32>, motherboard: Option<f32>, top_processes: Vec<ProcessInfo>,
 }
 
-fn config_path(app: &AppHandle) -> PathBuf {
-    app.path().app_config_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("config.toml")
-}
-
-fn log_path(app: &AppHandle) -> PathBuf {
-    app.path().app_log_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("warnings.log")
-}
-
-fn history_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("history.csv")
-}
+fn config_path(app: &AppHandle) -> PathBuf { app.path().app_config_dir().unwrap_or_default().join("config.toml") }
+fn log_path(app: &AppHandle) -> PathBuf { app.path().app_log_dir().unwrap_or_default().join("warnings.log") }
+fn history_path(app: &AppHandle) -> PathBuf { app.path().app_data_dir().unwrap_or_default().join("history.csv") }
+fn processes_path(app: &AppHandle) -> PathBuf { app.path().app_data_dir().unwrap_or_default().join("history_processes.json") }
 
 fn load_config(app: &AppHandle) -> Config {
     let path = config_path(app);
-    if let Ok(contents) = fs::read_to_string(&path) {
-        toml::from_str(&contents).unwrap_or_default()
-    } else {
-        Config::default()
-    }
+    if let Ok(contents) = fs::read_to_string(&path) { toml::from_str(&contents).unwrap_or_default() } else { Config::default() }
 }
 
 fn save_config(app: &AppHandle, config: &Config) -> anyhow::Result<()> {
@@ -79,25 +49,14 @@ fn save_config(app: &AppHandle, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn append_log(app: &AppHandle, message: &str) {
-    let path = log_path(app);
-    if let Some(p) = path.parent() { let _ = fs::create_dir_all(p); }
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(f, "[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), message);
-    }
-}
-
-fn append_history(app: &AppHandle, cpu: f32, gpu: Option<f32>, motherboard: Option<f32>) {
+fn append_history(app: &AppHandle, cpu: f32, gpu: Option<f32>, mb: Option<f32>) {
     let path = history_path(app);
-    if let Some(p) = path.parent() { let _ = fs::create_dir_all(p); }
     let write_header = !path.exists();
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-        if write_header {
-            let _ = writeln!(f, "timestamp,cpu,gpu,motherboard");
-        }
-        let gpu_s = gpu.map(|v| format!("{:.1}", v)).unwrap_or_default();
-        let mb_s  = motherboard.map(|v| format!("{:.1}", v)).unwrap_or_default();
-        let _ = writeln!(f, "{},{:.1},{},{}", Local::now().format("%Y-%m-%dT%H:%M:%S"), cpu, gpu_s, mb_s);
+        if write_header { let _ = writeln!(f, "timestamp,cpu,gpu,motherboard"); }
+        let g_s = gpu.map(|v| format!("{:.1}", v)).unwrap_or_default();
+        let m_s = mb.map(|v| format!("{:.1}", v)).unwrap_or_default();
+        let _ = writeln!(f, "{},{:.1},{},{}", Local::now().format("%Y-%m-%dT%H:%M:%S"), cpu, g_s, m_s);
     }
 }
 
@@ -106,168 +65,63 @@ fn position_window<R: Runtime>(window: &WebviewWindow<R>, position: &str) {
         let screen = monitor.size();
         let scale  = monitor.scale_factor();
         let pad    = (12.0 * scale) as u32;
-        let w      = win_size.width;
-        let h      = win_size.height;
         let (x, y) = match position {
             "top-left"     => (pad as i32, pad as i32),
-            "bottom-right" => (
-                screen.width.saturating_sub(w + pad) as i32,
-                screen.height.saturating_sub(h + pad) as i32,
-            ),
-            "bottom-left"  => (
-                pad as i32,
-                screen.height.saturating_sub(h + pad) as i32,
-            ),
-            _              => (
-                screen.width.saturating_sub(w + pad) as i32,
-                pad as i32,
-            ),
+            "bottom-right" => (screen.width.saturating_sub(win_size.width + pad) as i32, screen.height.saturating_sub(win_size.height + pad) as i32),
+            "bottom-left"  => (pad as i32, screen.height.saturating_sub(win_size.height + pad) as i32),
+            _              => (screen.width.saturating_sub(win_size.width + pad) as i32, pad as i32),
         };
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
 }
 
-fn effective_interval(cpu: f32, base: u64) -> u64 {
-    if cpu >= 80.0 {
-        base.min(10)
-    } else if cpu >= 70.0 {
-        base.min(20)
-    } else {
-        base
-    }.max(5)
-}
+#[tauri::command]
+fn get_config(state: tauri::State<SharedState>) -> Config { state.lock().unwrap().config.clone() }
 
 #[tauri::command]
-fn get_config(state: tauri::State<SharedState>) -> Config {
-    state.lock().unwrap().config.clone()
-}
-
-#[tauri::command]
-fn set_config(
-    app: AppHandle,
-    state: tauri::State<SharedState>,
-    new_config: Config,
-) -> Result<(), String> {
-    let (old_position, old_launch) = {
-        let s = state.lock().unwrap();
-        (s.config.display.position.clone(), s.config.display.launch_at_login)
-    };
-
+fn set_config(app: AppHandle, state: tauri::State<SharedState>, new_config: Config) -> Result<(), String> {
+    let old_pos = state.lock().unwrap().config.display.position.clone();
     state.lock().unwrap().config = new_config.clone();
     save_config(&app, &new_config).map_err(|e| e.to_string())?;
-
-    // Only toggle autolaunch if it changed
-    if new_config.display.launch_at_login != old_launch {
-        use tauri_plugin_autostart::ManagerExt;
-        if new_config.display.launch_at_login {
-            let _ = app.autolaunch().enable();
-        } else {
-            let _ = app.autolaunch().disable();
-        }
-    }
-
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_always_on_top(new_config.display.always_on_top);
-        // Only reposition if the position setting actually changed.
-        // This prevents snapping back to the corner after the user has dragged it.
-        if new_config.display.position != old_position {
-            position_window(&window, &new_config.display.position);
-        }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_always_on_top(new_config.display.always_on_top);
+        if new_config.display.position != old_pos { position_window(&w, &new_config.display.position); }
     }
     Ok(())
 }
 
 #[tauri::command]
-fn get_history(app: AppHandle) -> Vec<HistoryEntry> {
-    let path = history_path(&app);
-    let Ok(contents) = fs::read_to_string(&path) else { return vec![]; };
-
-    let cutoff = (Local::now() - ChronoDuration::hours(24))
-        .format("%Y-%m-%dT%H:%M:%S").to_string();
-
-    contents.lines().skip(1)
-        .filter_map(|line| {
-            let mut cols = line.splitn(4, ',');
-            let ts  = cols.next()?;
-            if ts < cutoff.as_str() { return None; }
-            let cpu: f32             = cols.next()?.parse().ok()?;
-            let gpu: Option<f32>     = cols.next().and_then(|s| s.parse().ok());
-            let motherboard: Option<f32> = cols.next().and_then(|s| s.parse().ok());
-            Some(HistoryEntry { timestamp: ts.to_string(), cpu, gpu, motherboard })
-        })
-        .collect()
-}
-
-#[tauri::command]
-fn get_history_path(app: AppHandle) -> String {
-    history_path(&app).to_string_lossy().to_string()
+async fn open_panel(app: AppHandle, label: String) {
+    if let Some(old) = app.get_webview_window("panel") { let _ = old.close(); }
+    if let Some(hud) = app.get_webview_window("main") {
+        let pos = hud.outer_position().unwrap_or_default();
+        let size = hud.outer_size().unwrap_or_default();
+        let mon = hud.current_monitor().unwrap().unwrap();
+        let spawn_y = if pos.y > (mon.size().height / 2) as i32 { pos.y - 470 } else { pos.y + size.height as i32 + 10 };
+        let _ = tauri::WebviewWindowBuilder::new(&app, "panel", tauri::WebviewUrl::App(format!("index.html#{}", label).into()))
+            .position(pos.x as f64, spawn_y as f64).inner_size(350.0, 480.0)
+            .decorations(false).always_on_top(true).transparent(false).build().unwrap();
+    }
 }
 
 fn start_poll_loop(app: AppHandle, state: SharedState) {
     std::thread::spawn(move || {
         let mut reader = SensorReader::new();
         let mut last_cpu: f32 = 0.0;
-
         loop {
-            let (cfg, monitor_cfg) = {
-                let s = state.lock().unwrap();
-                (s.config.clone(), s.config.monitor.clone())
-            };
-
-            let interval = Duration::from_secs(
-                effective_interval(last_cpu, cfg.thresholds.poll_interval_seconds)
-            );
-
-            let reading     = reader.read();
-            let cpu         = if monitor_cfg.cpu         { reading.cpu }         else { 0.0 };
-            let gpu         = if monitor_cfg.gpu         { reading.gpu }         else { None };
-            let motherboard = if monitor_cfg.motherboard { reading.motherboard } else { None };
+            let (cfg, m_cfg) = { let s = state.lock().unwrap(); (s.config.clone(), s.config.monitor.clone()) };
+            let reading = reader.read();
+            let cpu = if m_cfg.cpu { reading.cpu } else { 0.0 };
+            let gpu = if m_cfg.gpu { reading.gpu } else { None };
+            let mb = if m_cfg.motherboard { reading.motherboard } else { None };
             last_cpu = cpu;
 
-            append_history(&app, cpu, gpu, motherboard);
-
-            let (is_warning, state_changed, history) = {
-                let mut s = state.lock().unwrap();
-                s.monitor.tick(cpu, &cfg.thresholds)
-            };
-
-            let _ = app.emit("temp-update", &TempPayload {
-                cpu, gpu, motherboard, is_warning, history,
-            });
-
-            {
-                let s = state.lock().unwrap();
-                let just_triggered = s.monitor.just_triggered(state_changed);
-                let just_cleared   = s.monitor.just_cleared(state_changed);
-
-                if just_triggered {
-                    drop(s);
-                    let _ = app.emit("warning-triggered", ());
-                    append_log(&app, &format!("WARNING triggered — CPU {cpu:.1}°C"));
-                    if let Some(w) = app.get_webview_window("main") {
-                        let _ = w.set_always_on_top(true);
-                        let _ = w.set_focus();
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        use tauri_plugin_notification::NotificationExt;
-                        let _ = app.notification().builder()
-                            .title("CoolView ⚠ Temperature Warning")
-                            .body(format!("CPU above {:.0}°C — check your cooling!", cfg.thresholds.warning_temp))
-                            .show();
-                    }
-                } else if just_cleared {
-                    drop(s);
-                    let _ = app.emit("warning-cleared", ());
-                    append_log(&app, &format!("Warning cleared — CPU now {cpu:.1}°C"));
-                    if let Some(w) = app.get_webview_window("main") {
-                        let pref = state.lock().unwrap().config.display.always_on_top;
-                        let _ = w.set_always_on_top(pref);
-                    }
-                }
-            }
-
-            std::thread::sleep(interval);
+            let (is_warning, _st, history) = { let mut s = state.lock().unwrap(); s.monitor.tick(cpu, &cfg.thresholds) };
+            
+            append_history(&app, cpu, gpu, mb);
+            let _ = app.emit("temp-update", &TempPayload { cpu, gpu, motherboard: mb, is_warning, history, top_processes: vec![] });
+            
+            std::thread::sleep(Duration::from_secs(if cpu >= 80.0 { 10 } else { cfg.thresholds.poll_interval_seconds }));
         }
     });
 }
@@ -275,68 +129,29 @@ fn start_poll_loop(app: AppHandle, state: SharedState) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
         .setup(|app| {
             let cfg = load_config(app.handle());
-            let state: SharedState = Arc::new(Mutex::new(AppState {
-                monitor: Monitor::new(),
-                config: cfg.clone(),
-            }));
+            let state: SharedState = Arc::new(Mutex::new(AppState { monitor: Monitor::new(), config: cfg.clone(), visible: true }));
             app.manage(state.clone());
-
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_always_on_top(cfg.display.always_on_top);
-                position_window(&window, &cfg.display.position);
-            }
-
-            let quit = MenuItemBuilder::with_id("quit", "Quit CoolView").build(app)?;
-            let show = MenuItemBuilder::with_id("show", "Show / Hide").build(app)?;
+            if let Some(w) = app.get_webview_window("main") { position_window(&w, &cfg.display.position); }
+            
+            let tray_state = state.clone();
+            let show = MenuItemBuilder::with_id("show", "Show / Hide HUD").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
-            let icon = app.default_window_icon().cloned()
-                .expect("No default icon");
-
-            TrayIconBuilder::new()
-                .icon(icon)
-                .menu(&menu)
-                .tooltip("CoolView")
-                .on_menu_event(|app: &AppHandle, event: tauri::menu::MenuEvent| {
-                    match event.id().as_ref() {
-                        "quit" => app.exit(0),
-                        "show" => {
-                            if let Some(w) = app.get_webview_window("main") {
-                                let visible = w.is_visible().unwrap_or(true);
-                                if visible { let _ = w.hide(); }
-                                else { let _ = w.show(); let _ = w.set_focus(); }
-                            }
-                        }
-                        _ => {}
+            let _ = TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).menu(&menu).on_menu_event(move |app, e| {
+                if e.id() == "show" {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let mut s = tray_state.lock().unwrap();
+                        if s.visible { let _ = w.hide(); s.visible = false; } else { let _ = w.show(); s.visible = true; }
                     }
-                })
-                .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up, ..
-                    } = event {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let visible = w.is_visible().unwrap_or(true);
-                            if visible { let _ = w.hide(); }
-                            else { let _ = w.show(); let _ = w.set_focus(); }
-                        }
-                    }
-                })
-                .build(app)?;
+                } else if e.id() == "quit" { app.exit(0); }
+            }).build(app)?;
 
             start_poll_loop(app.handle().clone(), state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            get_config, set_config, get_history, get_history_path
-        ])
+        .invoke_handler(tauri::generate_handler![get_config, set_config, open_panel])
         .run(tauri::generate_context!())
         .expect("error while running CoolView");
 }
