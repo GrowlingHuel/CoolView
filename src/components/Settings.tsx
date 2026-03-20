@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Config } from "../types";
 
 interface SettingsProps {
@@ -18,7 +19,11 @@ export function Settings({ config, onSave, onClose, onOpenHistory }: SettingsPro
 
   return (
     <div style={{ position: "absolute", inset: 0, background: "rgb(14, 14, 20)", padding: "12px 14px", color: "white", overflowY: "auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+      {/* Draggable Header */}
+      <div 
+        style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, cursor: "grab" }}
+        onMouseDown={(e) => { if ((e.target as HTMLElement).tagName.toLowerCase() !== "button") getCurrentWebviewWindow().startDragging(); }}
+      >
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", opacity: 0.5 }}>⚙ Settings</span>
         <button onClick={onClose} style={{ background: "none", border: "none", color: "white", cursor: "pointer" }}>✕</button>
       </div>
