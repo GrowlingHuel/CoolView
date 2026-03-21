@@ -101,10 +101,10 @@ export function Settings({ config, isBottom, onSave, onClose, onOpenHistory }: S
   }
 
   const panelStyle: React.CSSProperties = {
-    position: "absolute",
+    position: "relative",
     ...(isBottom ? { bottom: 0 } : { top: 0 }),
     left: 0,
-    width: 278,
+    width: "100%",
     background: "rgba(14, 14, 20, 0.97)",
     backdropFilter: undefined,
     WebkitBackdropFilter: undefined,

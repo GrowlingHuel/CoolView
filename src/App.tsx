@@ -7,42 +7,43 @@ import { Settings } from "./components/Settings";
 import { History } from "./components/History";
 import { Config, TempPayload } from "./types";
 
-type View = "hud" | "settings" | "history";
-
 const DEFAULT_CONFIG: Config = {
   display: { show_sparkline: false, always_on_top: true, position: "top-right", unit: "C", launch_at_login: false },
   thresholds: { warning_temp: 85, warning_duration_seconds: 180, poll_interval_seconds: 30 },
   monitor: { cpu: true, gpu: true, motherboard: true },
 };
 
-async function fetchConfig(): Promise<Config> {
-  return await invoke<Config>("get_config");
+// Determine which view this window should show from the URL hash
+const view = window.location.hash.replace('#', '') || 'hud';
+
+// Mark body so CSS can target panel windows specifically
+if (view !== 'hud') {
+  document.body.classList.add('panel-window');
 }
 
 export default function App() {
-  const [temps,        setTemps]        = useState<TempPayload | null>(null);
-  const [config,       setConfig]       = useState<Config>(DEFAULT_CONFIG);
-  const [view,         setView]         = useState<View>("hud");
-  const [isWarning,    setIsWarning]    = useState(false);
-  const [isBottom,     setIsBottom]     = useState(false);
-
-  // Detect which half of screen the window is in — checked when panels open
-  // (not using onMoved as it causes XCB threading issues on Linux/GTK)
-  async function refreshIsBottom() {
-    const win = getCurrentWebviewWindow();
-    const [monitor, pos] = await Promise.all([
-      win.currentMonitor(),
-      win.outerPosition(),
-    ]);
-    if (monitor) setIsBottom(pos.y > monitor.size.height / 2);
-  }
-
-  useEffect(() => { refreshIsBottom().catch(console.error); }, []);
-
-  useEffect(() => { fetchConfig().then(setConfig).catch(console.error); }, []);
+  const [temps,    setTemps]    = useState<TempPayload | null>(null);
+  const [config,   setConfig]   = useState<Config>(DEFAULT_CONFIG);
+  const [isWarning,setIsWarning]= useState(false);
+  const [isBottom, setIsBottom] = useState(false);
 
   useEffect(() => {
-    function onConfigChanged() { fetchConfig().then(setConfig).catch(console.error); }
+    invoke<Config>("get_config").then(setConfig).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    async function checkPos() {
+      const win = getCurrentWebviewWindow();
+      const [mon, pos] = await Promise.all([win.currentMonitor(), win.outerPosition()]);
+      if (mon) setIsBottom(pos.y > mon.size.height / 2);
+    }
+    checkPos().catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    function onConfigChanged() {
+      invoke<Config>("get_config").then(setConfig).catch(console.error);
+    }
     window.addEventListener("coolview:config-changed", onConfigChanged);
     return () => window.removeEventListener("coolview:config-changed", onConfigChanged);
   }, []);
@@ -55,44 +56,53 @@ export default function App() {
     return () => { unlisten.then(f => f()); };
   }, []);
 
-  useEffect(() => {
-    const on  = listen("warning-triggered", () => setIsWarning(true));
-    const off = listen("warning-cleared",   () => setIsWarning(false));
-    return () => { on.then(f => f()); off.then(f => f()); };
-  }, []);
-
   const handleSaveConfig = useCallback(async (newConfig: Config) => {
-    try {
-      await invoke("set_config", { newConfig });
-      setConfig(newConfig);
-      setView("hud");
-    } catch (err) { console.error(err); }
+    await invoke("set_config", { newConfig });
+    setConfig(newConfig);
+    getCurrentWebviewWindow().close();
   }, []);
 
-  return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+  // ── HUD window ──────────────────────────────────────────────────────────────
+  if (view === "hud") {
+    return (
       <HUD
         temps={temps}
         config={config}
         isWarning={isWarning}
         isBottom={isBottom}
-        onOpenSettings={() => { refreshIsBottom().catch(console.error); setView("settings"); }}
-        onOpenHistory={() => { refreshIsBottom().catch(console.error); setView("history"); }}
+        onOpenSettings={() => invoke("open_panel", { label: "settings" })}
+        onOpenHistory={() => invoke("open_panel", { label: "history" })}
       />
+    );
+  }
+
+  // ── Panel window (settings or history) ─────────────────────────────────────
+  return (
+    <div style={{
+      width: "100vw",
+      height: "100vh",
+      background: "rgb(14,14,20)",
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    }}>
       {view === "settings" && (
         <Settings
           config={config}
-          isBottom={isBottom}
+          isBottom={false}
           onSave={handleSaveConfig}
-          onClose={() => setView("hud")}
-          onOpenHistory={() => { refreshIsBottom().catch(console.error); setView("history"); }}
+          onClose={() => getCurrentWebviewWindow().close()}
+          onOpenHistory={() => {
+            window.location.hash = 'history';
+            window.location.reload();
+          }}
         />
       )}
       {view === "history" && (
         <History
           config={config}
-          isBottom={isBottom}
-          onClose={() => setView("hud")}
+          isBottom={false}
+          onClose={() => getCurrentWebviewWindow().close()}
         />
       )}
     </div>

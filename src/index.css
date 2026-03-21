@@ -36,3 +36,12 @@ body {
 .animate-pulse-warning {
   animation: pulse-warning 1.4s ease-in-out infinite;
 }
+
+/* Panel window — remove any OS whitespace/margin */
+body.panel-window {
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: rgb(14,14,20) !important;
+  border: none !important;
+}
