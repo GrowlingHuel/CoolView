@@ -45,7 +45,14 @@ export default function App() {
       invoke<Config>("get_config").then(setConfig).catch(console.error);
     }
     window.addEventListener("coolview:config-changed", onConfigChanged);
-    return () => window.removeEventListener("coolview:config-changed", onConfigChanged);
+    // Also listen for Tauri event from panel window saving config
+    const unlisten = listen("config-updated", () => {
+      invoke<Config>("get_config").then(setConfig).catch(console.error);
+    });
+    return () => {
+      window.removeEventListener("coolview:config-changed", onConfigChanged);
+      unlisten.then(f => f());
+    };
   }, []);
 
   useEffect(() => {

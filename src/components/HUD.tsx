@@ -42,6 +42,14 @@ function tempColor(c: number | null | undefined): string {
 
 export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpenHistory }: HUDProps) {
   const [hovered, setHovered] = useState(false);
+  const [panelCooldown, setPanelCooldown] = useState(false);
+
+  function openPanel(fn: () => void) {
+    if (panelCooldown) return;
+    setPanelCooldown(true);
+    fn();
+    setTimeout(() => setPanelCooldown(false), 600);
+  }
   const { unit, show_sparkline } = config.display;
 
   function handleMouseDown(e: React.MouseEvent) {
@@ -73,7 +81,6 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
     color: tempColor(c),
     textShadow: isWarning ? warningOutline : textOutline,
     lineHeight: 1, letterSpacing: "-0.02em",
-    willChange: "transform",
   });
 
   const iconBtn: React.CSSProperties = {
@@ -111,8 +118,8 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
       >
         {/* Icon row — top of right content */}
         <div style={{ display: "flex", gap: 4, alignItems: "center", alignSelf: "flex-end" }}>
-          <button style={iconBtn} onClick={onOpenHistory} title="History">≡</button>
-          <button style={iconBtn} onClick={onOpenSettings} title="Settings">⚙</button>
+          <button style={iconBtn} onClick={() => openPanel(onOpenHistory)} title="History">≡</button>
+          <button style={iconBtn} onClick={() => openPanel(onOpenSettings)} title="Settings">⚙</button>
         </div>
 
         {/* Warning */}
@@ -126,7 +133,7 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
         )}
 
         {/* Temp readings */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 8, willChange: "transform", transform: "translateZ(0)" }}>
           {config.monitor.cpu && (
             <div style={{ textAlign: "center" as const }}>
               <div style={labelStyle}>CPU</div>

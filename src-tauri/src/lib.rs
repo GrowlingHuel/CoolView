@@ -182,19 +182,19 @@ fn set_config(
 
 #[tauri::command]
 async fn open_panel(app: AppHandle, label: String) {
-    // If same panel already open with same label, just focus it
-    // If different label, close and reopen
+    // If any panel already open, close it and wait briefly
     if let Some(existing) = app.get_webview_window("panel") {
-        // Check current URL to see if it's the same panel
-        let current_url = existing.url().map(|u| u.to_string()).unwrap_or_default();
+        let current_url = existing.url()
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+        // Same panel — just focus
         if current_url.contains(&label) {
             let _ = existing.set_focus();
             return;
         }
-        // Different panel requested — close current first
+        // Different panel — close and wait
         let _ = existing.close();
-        // Wait for close to complete
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(300));
     }
 
     let hud = match app.get_webview_window("main") {
@@ -204,18 +204,14 @@ async fn open_panel(app: AppHandle, label: String) {
 
     let pos  = hud.outer_position().unwrap_or_default();
     let size = hud.outer_size().unwrap_or_default();
+    let panel_w: f64 = 350.0;
+    let panel_h: f64 = 540.0;
 
-    let panel_w: f64 = 300.0;
-    let panel_h: f64 = 420.0;
-
-    // Position panel above or below HUD depending on screen position
     let spawn_y = if let Ok(Some(mon)) = hud.current_monitor() {
         let screen_h = mon.size().height as i32;
         if pos.y > screen_h / 2 {
-            // Bottom half — panel goes above HUD
             pos.y - panel_h as i32 - 8
         } else {
-            // Top half — panel goes below HUD
             pos.y + size.height as i32 + 8
         }
     } else {
@@ -232,10 +228,8 @@ async fn open_panel(app: AppHandle, label: String) {
     .position(pos.x as f64, spawn_y)
     .inner_size(panel_w, panel_h)
     .decorations(false)
-    .always_on_top(true)
-    .transparent(false)   // NOT transparent — avoids all compositor ghosting
+    .transparent(false)
     .resizable(false)
-    .skip_taskbar(true)
     .build();
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Config } from "../types";
 
@@ -68,7 +68,18 @@ const btn = (primary?: boolean): React.CSSProperties => ({
 });
 
 export function Settings({ config, isBottom, onSave, onClose, onOpenHistory }: SettingsProps) {
+
+  // Resize window to fit content after render
+  useEffect(() => {
+    const win = getCurrentWebviewWindow();
+  });
+
   const [draft, setDraft] = useState<Config>(JSON.parse(JSON.stringify(config)));
+
+  // Re-sync draft when config loads from backend (panel window async fetch)
+  useEffect(() => {
+    setDraft(JSON.parse(JSON.stringify(config)));
+  }, [config]);
   const unit = draft.display.unit;
 
   useEffect(() => {

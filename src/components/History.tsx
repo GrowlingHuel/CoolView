@@ -7,6 +7,7 @@ interface HistoryProps {
   config: Config;
   isBottom: boolean;
   onClose: () => void;
+  onOpenSettings: () => void;
 }
 
 const W = 210;  // graph width
@@ -41,7 +42,7 @@ function formatTemp(t: number | null, unit: "C" | "F"): string {
   return unit === "F" ? `${Math.round(t * 9 / 5 + 32)}°F` : `${Math.round(t)}°C`;
 }
 
-export function History({ config, isBottom, onClose }: HistoryProps) {
+export function History({ config, isBottom, onClose, onOpenSettings }: HistoryProps) {
   const [entries, setEntries]     = useState<HistoryEntry[]>([]);
   const [filePath, setFilePath]   = useState("");
   const [loading, setLoading]     = useState(true);
@@ -196,8 +197,9 @@ export function History({ config, isBottom, onClose }: HistoryProps) {
         </>
       )}
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button style={btn(true)} onClick={onClose}>← Back</button>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <button style={btn()} onClick={() => { onClose(); }}>← Back</button>
+        <button style={btn(true)} onClick={onOpenSettings}>⚙ Settings</button>
       </div>
     </div>
   );
