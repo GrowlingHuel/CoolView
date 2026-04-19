@@ -280,3 +280,117 @@ is calling freeze without a matching thaw.
 - Removing set_always_on_top call from setup
 - Removing position_window call from setup
 - Setting always_on_top: false in tauri.conf.json
+
+---
+
+## CRASH ROOT CAUSE FOUND — position_window() in setup()
+
+**Date:** Latest CC session (9m 17s analysis)
+
+**Root cause:** `position_window()` called synchronously in `setup()` BEFORE
+the GTK event loop starts. The call chain:
+`position_window()` → `current_monitor()` + `outer_size()` + `set_position()`
+triggers GTK's internal resize/layout machinery on a transparent,
+decorations-less, always-on-top window that hasn't been fully realized yet.
+This calls `gdk_window_thaw_toplevel_updates` on a GDK window whose freeze
+counter is already 0 — corrupting it to -1.
+
+The redundant `set_always_on_top(true)` call in setup() (tauri.conf.json
+already sets alwaysOnTop: true) compounds the problem.
+
+**Why crash is 11s later:** Corruption happens at startup. Nothing triggers
+the crash surface until the first `WebviewWindowBuilder::build()` call (panel
+creation), which issues `ChangeWindowAttributes`. The corrupted GDK state
+causes X server to return `BadImplementation`.
+
+**Why other suspects are innocent:**
+- TrayIconBuilder::build() — doesn't interact with any window's GDK state
+- always_on_top: true in tauri.conf.json — just a window hint, not the cause
+- transparent: true + always_on_top: true combination — not the cause alone
+
+**The fix:** Defer window operations until after GTK event loop starts.
+Use `thread::spawn` + `run_on_main_thread` with 100ms delay to guarantee
+operations post to the event loop queue AFTER window realization:
+
+```rust
+std::thread::spawn(move || {
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let handle2 = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(w) = handle2.get_webview_window("main") {
+            let _ = w.set_always_on_top(init_aot);
+            position_window(&w, &init_pos);
+        }
+    });
+});
+```
+
+**Key insight:** `run_on_main_thread` called from setup() (main thread) may
+run synchronously. Called from a background thread, it's guaranteed to post
+to the GTK event loop queue and run after window realization.
+
+**Status:** Fix implemented by CC. Needs testing.
+
+---
+
+## Update — position_window fix partially worked
+
+**Fix applied:** Deferred `position_window()` and `set_always_on_top()` to
+post-GTK-event-loop via `thread::spawn` + `run_on_main_thread` with 100ms delay.
+
+**CC bug:** The deferred init block was accidentally placed INSIDE the poll loop,
+calling `set_always_on_top` + `position_window` on every poll cycle. Removed.
+
+**Result after fix:**
+- `gdk_window_thaw_toplevel_updates` warning NO LONGER appears at startup ✓
+- Crash still happens at ~2 minutes, serial 26998
+- No preceding warning before crash this time
+- This means a DIFFERENT source of crash exists, previously masked
+
+**New crash characteristics:**
+- No startup warning
+- Happens after ~2 minutes of use
+- Triggered by: close panel → reopen panel
+- Serial 26998 suggests accumulated state from repeated operations
+
+**Current unknowns:**
+- What is now calling `ChangeWindowAttributes` (opcode 20) that fails?
+- Is it the `set_always_on_top()` calls in the poll loop warning/clear handlers?
+- Is it the `set_config` command calling `set_always_on_top` + `position_window`?
+- Is it the panel window's `eval()` navigation triggering something?
+
+**HUD drag broken:** `startDragging()` was removed to test crash hypothesis.
+Needs to be restored OR replaced with safe alternative.
+
+---
+
+## CRASH ROOT CAUSE FULLY IDENTIFIED — GTK thread safety
+
+**Final root cause:** GTK is not thread-safe. ALL GTK operations must run on
+the GTK main thread. Two offenders were calling GTK operations from worker
+threads:
+
+1. **`set_config` command** — Tauri command handlers run on a worker thread
+   pool, not the GTK main thread. Was calling `w.set_always_on_top()` +
+   `position_window()` directly. Every settings save = one corruption hit.
+
+2. **Poll loop warning/clear handlers** — Running in `std::thread::spawn`,
+   was calling `w.set_always_on_top()` + `w.set_focus()` directly from
+   background thread.
+
+After enough corruptions (~2 min of use), the next `WebviewWindowBuilder::build()`
+issued `ChangeWindowAttributes` and X11 returned `BadImplementation`.
+
+**Fix:** All GTK operations now dispatched through `app.run_on_main_thread()`
+which queues them to run on the GTK main thread via the event loop.
+
+**RULE TO NEVER VIOLATE:** Any Tauri window operation (`set_always_on_top`,
+`set_focus`, `set_position`, `build()`) called from a background thread or
+command handler MUST be wrapped in `app.run_on_main_thread(|| { ... })`.
+
+**Other fixes in same CC session:**
+- `startDragging()` restored to HUD.tsx (was not the crash cause)
+- TypeScript build error fixed: `currentMonitor()` is standalone from
+  `@tauri-apps/api/window`, not a method on `WebviewWindow`
+
+**Status:** Testing required.

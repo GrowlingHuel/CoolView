@@ -262,3 +262,49 @@ Startup sequence in `lib.rs setup()` — one of these is corrupting freeze count
 2. `position_window()` → `set_position()`
 3. `window.set_always_on_top()`
 4. `transparent: true` + `always_on_top: true` combination in tauri.conf.json
+
+---
+
+## CRASH FIXED — position_window() deferred to post-GTK-event-loop
+
+### Root cause (confirmed by CC)
+`position_window()` + `set_always_on_top()` called in `setup()` before GTK
+event loop starts. Corrupts GDK freeze counter to -1. First panel open
+triggers `ChangeWindowAttributes` which hits the corrupted state → crash.
+
+### Fix applied
+Moved window initialization into `thread::spawn` → `run_on_main_thread` with
+100ms delay. This guarantees the operations run AFTER the GTK event loop has
+started and the window is fully realized.
+
+Removed redundant `set_always_on_top()` call from setup() since
+tauri.conf.json already sets `alwaysOnTop: true`.
+
+### Status
+Fix implemented. Testing required:
+- [ ] No crash after 3+ minutes of Settings/History clicking
+- [ ] HUD positions correctly on startup
+- [ ] Always-on-top still works
+- [ ] Ghost clears within 30s
+
+---
+
+## CRITICAL RULE ESTABLISHED — GTK Thread Safety
+
+**Any Tauri window operation called from a background thread or command handler
+MUST be wrapped in `app.run_on_main_thread(|| { ... })`.**
+
+This includes: `set_always_on_top`, `set_focus`, `set_position`,
+`WebviewWindowBuilder::build()`, and any other GTK-touching operation.
+
+Violating this causes incremental GDK state corruption that manifests as
+`BadImplementation` X11 crash after ~2 minutes of use.
+
+**Fixed in lib.rs:**
+- `set_config` command: all window ops now via `run_on_main_thread`
+- Poll loop warning/clear: all window ops now via `run_on_main_thread`
+- Startup: already fixed (deferred via thread::spawn + run_on_main_thread)
+
+**Also fixed:**
+- `startDragging()` restored to HUD.tsx
+- TypeScript: `currentMonitor()` is standalone from `@tauri-apps/api/window`
