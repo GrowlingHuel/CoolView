@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { HUD } from "./components/HUD";
 import { Settings } from "./components/Settings";
 import { History } from "./components/History";
@@ -33,8 +33,7 @@ export default function App() {
 
   useEffect(() => {
     async function checkPos() {
-      const win = getCurrentWebviewWindow();
-      const [mon, pos] = await Promise.all([win.currentMonitor(), win.outerPosition()]);
+      const [mon, pos] = await Promise.all([currentMonitor(), getCurrentWindow().outerPosition()]);
       if (mon) setIsBottom(pos.y > mon.size.height / 2);
     }
     checkPos().catch(console.error);
@@ -66,7 +65,7 @@ export default function App() {
   const handleSaveConfig = useCallback(async (newConfig: Config) => {
     await invoke("set_config", { newConfig });
     setConfig(newConfig);
-    getCurrentWebviewWindow().close();
+    await invoke("hide_panel");
   }, []);
 
   // ── HUD window ──────────────────────────────────────────────────────────────
@@ -98,7 +97,7 @@ export default function App() {
           config={config}
           isBottom={false}
           onSave={handleSaveConfig}
-          onClose={() => getCurrentWebviewWindow().close()}
+          onClose={() => invoke("hide_panel")}
           onOpenHistory={() => {
             window.location.hash = 'history';
             window.location.reload();
@@ -109,7 +108,7 @@ export default function App() {
         <History
           config={config}
           isBottom={false}
-          onClose={() => getCurrentWebviewWindow().close()}
+          onClose={() => invoke("hide_panel")}
           onOpenSettings={() => {
             window.location.hash = "settings";
             window.location.reload();

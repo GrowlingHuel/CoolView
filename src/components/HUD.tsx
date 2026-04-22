@@ -52,9 +52,10 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
   }
   const { unit, show_sparkline } = config.display;
 
-  function handleMouseDown(_e: React.MouseEvent) {
-    // startDragging() removed — XGrabPointer corrupts GTK freeze/thaw counter
-    // causing X11 BadImplementation crash after ~90s. Use Settings > Position.
+  function handleMouseDown(e: React.MouseEvent) {
+    // Don't drag when clicking buttons (unit toggle, settings, history icons)
+    if ((e.target as HTMLElement).closest("button")) return;
+    getCurrentWebviewWindow().startDragging();
   }
 
   async function handleUnitClick(e: React.MouseEvent) {

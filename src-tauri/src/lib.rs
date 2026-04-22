@@ -171,13 +171,32 @@ fn set_config(
         }
     }
 
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_always_on_top(new_config.display.always_on_top);
-        if new_config.display.position != old_pos {
-            position_window(&w, &new_config.display.position);
+    // GTK window operations must run on the main thread.
+    // set_config runs on Tauri's command thread — dispatching via run_on_main_thread
+    // prevents accumulated GDK state corruption (causes BadImplementation crash).
+    let aot      = new_config.display.always_on_top;
+    let new_pos  = new_config.display.position.clone();
+    let pos_changed = new_pos != old_pos;
+    let app_h = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = app_h.get_webview_window("main") {
+            let _ = w.set_always_on_top(aot);
+            if pos_changed {
+                position_window(&w, &new_pos);
+            }
         }
-    }
+    });
     Ok(())
+}
+
+#[tauri::command]
+fn hide_panel(app: AppHandle) {
+    let app_h = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(panel) = app_h.get_webview_window("panel") {
+            let _ = panel.hide();
+        }
+    });
 }
 
 #[tauri::command]
@@ -187,57 +206,49 @@ async fn open_panel(app: AppHandle, label: String) {
         return;
     }
 
-    // If any panel already open...
-    if let Some(existing) = app.get_webview_window("panel") {
-        let current_url = existing.url()
-            .map(|u| u.to_string())
-            .unwrap_or_default();
-        // Same panel — just focus
-        if current_url.contains(&label) {
-            let _ = existing.set_focus();
+    // Panel window is pre-created hidden at startup — no runtime window creation.
+    // Show, reposition, and navigate it instead to avoid all GTK lifecycle races.
+    let _ = app.clone().run_on_main_thread(move || {
+        let panel = match app.get_webview_window("panel") {
+            Some(w) => w,
+            None => return,
+        };
+        let hud = match app.get_webview_window("main") {
+            Some(w) => w,
+            None => return,
+        };
+
+        // Already showing the correct panel — just focus
+        let current_url = panel.url().map(|u| u.to_string()).unwrap_or_default();
+        if panel.is_visible().unwrap_or(false) && current_url.contains(&label) {
+            let _ = panel.set_focus();
             return;
         }
-        // Different panel — navigate in-place to avoid GTK window lifecycle race
-        // (close + recreate causes BadImplementation via freeze/thaw counter mismatch)
-        let js = format!("window.location.hash = '{}'; window.location.reload();", label);
-        let _ = existing.eval(&js);
-        let _ = existing.set_focus();
-        return;
-    }
 
-    let hud = match app.get_webview_window("main") {
-        Some(w) => w,
-        None => return,
-    };
+        let pos    = hud.outer_position().unwrap_or_default();
+        let size   = hud.outer_size().unwrap_or_default();
+        let panel_h: i32 = 480;
 
-    let pos  = hud.outer_position().unwrap_or_default();
-    let size = hud.outer_size().unwrap_or_default();
-    let panel_w: f64 = 350.0;
-    let panel_h: f64 = 540.0;
-
-    let spawn_y = if let Ok(Some(mon)) = hud.current_monitor() {
-        let screen_h = mon.size().height as i32;
-        if pos.y > screen_h / 2 {
-            pos.y - panel_h as i32 - 8
+        let spawn_y = if let Ok(Some(mon)) = hud.current_monitor() {
+            let screen_h = mon.size().height as i32;
+            if pos.y > screen_h / 2 {
+                pos.y - panel_h - 8
+            } else {
+                pos.y + size.height as i32 + 8
+            }
         } else {
             pos.y + size.height as i32 + 8
         }
-    } else {
-        pos.y + size.height as i32 + 8
-    };
+        .max(0);
 
-    let spawn_y = spawn_y.max(0) as f64;
-
-    let _ = tauri::WebviewWindowBuilder::new(
-        &app,
-        "panel",
-        tauri::WebviewUrl::App(format!("index.html#{}", label).into()),
-    )
-    .position(pos.x as f64, spawn_y)
-    .inner_size(panel_w, panel_h)
-    .transparent(false)
-    .resizable(false)
-    .build();
+        let _ = panel.set_position(PhysicalPosition::new(pos.x, spawn_y));
+        let _ = panel.eval(&format!(
+            "window.location.hash = '{}'; window.location.reload();",
+            label
+        ));
+        let _ = panel.show();
+        let _ = panel.set_focus();
+    });
 }
 
 // ── Poll loop ─────────────────────────────────────────────────────────────────
@@ -303,10 +314,14 @@ fn start_poll_loop(app: AppHandle, state: SharedState) {
                 if triggered {
                     drop(s);
                     append_log(&app, &format!("WARNING triggered — CPU {cpu:.1}°C"));
-                    if let Some(w) = app.get_webview_window("main") {
-                        let _ = w.set_always_on_top(true);
-                        let _ = w.set_focus();
-                    }
+                    // GTK calls must be on the main thread — poll loop runs in a bg thread
+                    let app_h = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let Some(w) = app_h.get_webview_window("main") {
+                            let _ = w.set_always_on_top(true);
+                            let _ = w.set_focus();
+                        }
+                    });
                     #[cfg(not(target_os = "linux"))]
                     {
                         use tauri_plugin_notification::NotificationExt;
@@ -318,10 +333,13 @@ fn start_poll_loop(app: AppHandle, state: SharedState) {
                 } else if cleared {
                     drop(s);
                     append_log(&app, &format!("Warning cleared — CPU now {cpu:.1}°C"));
-                    if let Some(w) = app.get_webview_window("main") {
-                        let pref = state.lock().unwrap().config.display.always_on_top;
-                        let _ = w.set_always_on_top(pref);
-                    }
+                    let pref = state.lock().unwrap().config.display.always_on_top;
+                    let app_h = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let Some(w) = app_h.get_webview_window("main") {
+                            let _ = w.set_always_on_top(pref);
+                        }
+                    });
                 }
             }
 
@@ -349,10 +367,7 @@ pub fn run() {
             }));
             app.manage(state.clone());
 
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_always_on_top(cfg.display.always_on_top);
-                position_window(&w, &cfg.display.position);
-            }
+
 
             // Tray
             let tray_state = state.clone();
@@ -392,11 +407,41 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Defer position + always_on_top until GTK event loop is running
+            // to avoid corrupting the GDK freeze counter (causes BadImplementation crash)
+            {
+                let handle = app.handle().clone();
+                let init_pos = cfg.display.position.clone();
+                let init_aot = cfg.display.always_on_top;
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let handle2 = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        if let Some(w) = handle2.get_webview_window("main") {
+                            let _ = w.set_always_on_top(init_aot);
+                            position_window(&w, &init_pos);
+                        }
+                        // Pre-create panel window hidden so open_panel never calls
+                        // WebviewWindowBuilder::build() at runtime (avoids GTK lifecycle crash)
+                        let _ = tauri::WebviewWindowBuilder::new(
+                            &handle2,
+                            "panel",
+                            tauri::WebviewUrl::App("index.html#settings".into()),
+                        )
+                        .inner_size(320.0, 480.0)
+                        .transparent(false)
+                        .decorations(false)
+                        .resizable(false)
+                        .visible(false)
+                        .build();
+                    });
+                });
+            }
             start_poll_loop(app.handle().clone(), state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_config, set_config, get_history, get_history_path, open_panel
+            get_config, set_config, get_history, get_history_path, open_panel, hide_panel
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoolView");
