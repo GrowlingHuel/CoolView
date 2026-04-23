@@ -1,6 +1,6 @@
 {
   "productName": "CoolView",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "identifier": "com.coolview.app",
   "build": {
     "frontendDist": "../dist",
