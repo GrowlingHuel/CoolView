@@ -192,8 +192,8 @@ export function History({ config, isBottom, onClose, onOpenSettings }: HistoryPr
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <button style={btn()} onClick={() => { onClose(); }}>← Back</button>
-        <button style={btn(true)} onClick={onOpenSettings}>⚙ Settings</button>
+        <button style={btn()} onClick={onOpenSettings}>Settings</button>
+        <button style={btn()} onClick={onClose}>Close</button>
       </div>
     </div>
   );

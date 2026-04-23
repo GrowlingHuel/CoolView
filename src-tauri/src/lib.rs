@@ -219,56 +219,37 @@ fn hide_panel(app: AppHandle) {
 
 #[tauri::command]
 async fn open_panel(app: AppHandle, label: String) {
-    // Validate label to prevent eval injection
-    if label != "settings" && label != "history" {
-        return;
-    }
-
-    // Panel window is pre-created hidden at startup — no runtime window creation.
-    // Show, reposition, and navigate it instead to avoid all GTK lifecycle races.
+    if label != "settings" && label != "history" { return; }
     let _ = app.clone().run_on_main_thread(move || {
-        let panel = match app.get_webview_window("panel") {
-            Some(w) => w,
-            None => return,
-        };
         let hud = match app.get_webview_window("main") {
             Some(w) => w,
             None => return,
         };
-
-        // Already showing the correct panel — just focus
-        let current_url = panel.url().map(|u| u.to_string()).unwrap_or_default();
-        if panel.is_visible().unwrap_or(false) && current_url.contains(&label) {
-            let _ = panel.set_focus();
-            return;
-        }
-
-        let pos    = hud.outer_position().unwrap_or_default();
-        let size   = hud.outer_size().unwrap_or_default();
-        let panel_h: i32 = 480;
-
-        let spawn_y = if let Ok(Some(mon)) = hud.current_monitor() {
-            let screen_h = mon.size().height as i32;
-            if pos.y > screen_h / 2 {
-                pos.y - panel_h - 8
-            } else {
-                pos.y + size.height as i32 + 8
+        if let Some(panel) = app.get_webview_window("panel") {
+            let url = panel.url().map(|u| u.to_string()).unwrap_or_default();
+            if panel.is_visible().unwrap_or(false) && url.contains(&label) {
+                let _ = panel.set_focus(); return;
             }
-        } else {
-            pos.y + size.height as i32 + 8
+            let pos = hud.outer_position().unwrap_or_default();
+            let size = hud.outer_size().unwrap_or_default();
+            let spawn_y = if let Ok(Some(mon)) = hud.current_monitor() {
+                if pos.y > mon.size().height as i32 / 2 { pos.y - 488 } else { pos.y + size.height as i32 + 8 }
+            } else { pos.y + size.height as i32 + 8 }.max(0);
+            let _ = panel.set_position(PhysicalPosition::new(pos.x, spawn_y));
+            let _ = panel.eval(&format!("window.location.hash='{}';window.location.reload();", label));
+            let _ = panel.show(); let _ = panel.set_focus(); return;
         }
-        .max(0);
-
-        let _ = panel.set_position(PhysicalPosition::new(pos.x, spawn_y));
-        let _ = panel.eval(&format!(
-            "window.location.hash = '{}'; window.location.reload();",
-            label
-        ));
-        let _ = panel.show();
-        let _ = panel.set_focus();
+        let pos = hud.outer_position().unwrap_or_default();
+        let size = hud.outer_size().unwrap_or_default();
+        let spawn_y = (if let Ok(Some(mon)) = hud.current_monitor() {
+            if pos.y > mon.size().height as i32 / 2 { pos.y as f64 - 488.0 } else { pos.y as f64 + size.height as f64 + 8.0 }
+        } else { pos.y as f64 + size.height as f64 + 8.0 }).max(0.0);
+        let _ = tauri::WebviewWindowBuilder::new(&app, "panel",
+            tauri::WebviewUrl::App(format!("index.html#{}", label).into()))
+            .position(pos.x as f64, spawn_y).inner_size(320.0, 480.0)
+            .decorations(false).resizable(false).build();
     });
 }
-
 // ── Poll loop ─────────────────────────────────────────────────────────────────
 
 fn start_poll_loop(app: AppHandle, state: SharedState) {
@@ -439,18 +420,6 @@ pub fn run() {
                             let _ = w.set_always_on_top(init_aot);
                             position_window(&w, &init_pos);
                         }
-                        // Pre-create panel window hidden so open_panel never calls
-                        // WebviewWindowBuilder::build() at runtime (avoids GTK lifecycle crash)
-                        let _ = tauri::WebviewWindowBuilder::new(
-                            &handle2,
-                            "panel",
-                            tauri::WebviewUrl::App("index.html#settings".into()),
-                        )
-                        .inner_size(320.0, 480.0)
-                        .decorations(false)
-                        .resizable(false)
-                        .visible(false)
-                        .build();
                     });
                 });
             }

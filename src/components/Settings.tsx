@@ -220,7 +220,7 @@ export function Settings({ config, isBottom, onSave, onClose, onOpenHistory }: S
           style={{ ...btn(), marginRight: "auto" }}
           onClick={onOpenHistory}
         >History</button>
-        <button style={btn()} onClick={onClose}>Cancel</button>
+        <button style={btn()} onClick={onClose}>Close</button>
         <button style={btn(true)} onClick={() => onSave(draft)}>Save</button>
       </div>
       <div style={{ fontSize: 10, opacity: 0.2, textAlign: "center" as const, marginTop: 6 }}>
