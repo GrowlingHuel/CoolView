@@ -18,9 +18,16 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow,
 };
+#[cfg(target_os = "linux")]
+use x11rb::connection::Connection;
 
-struct AppState { config: Config, monitor: Monitor, visible: bool }
+struct AppState {
+    config: Config,
+    monitor: Monitor,
+    visible: bool,
+}
 type SharedState = Arc<Mutex<AppState>>;
+
 
 #[derive(Clone, Serialize, Deserialize)]
 struct ProcessInfo { name: String, cpu_percent: f32, pid: u32 }
@@ -207,6 +214,7 @@ fn set_config(
     Ok(())
 }
 
+
 #[tauri::command]
 fn hide_panel(app: AppHandle) {
     let app_h = app.clone();
@@ -250,6 +258,66 @@ async fn open_panel(app: AppHandle, label: String) {
             .decorations(false).resizable(false).build();
     });
 }
+// ── X11 input shaping ─────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn configure_x11_input_shape(app: AppHandle) {
+    let _ = app.run_on_main_thread(move || {
+        use gdkx11::glib::prelude::*;
+
+        // Get XID — apply shape to ALL toplevel windows to hit the right one
+        let xids: Vec<u64> = gdkx11::gdk::Screen::default()
+            .map(|screen| screen.toplevel_windows())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|gdk_win| gdk_win.downcast::<gdkx11::X11Window>().ok())
+            .map(|x11_win| x11_win.xid() as u64)
+            .collect();
+        let xid = xids.last().copied();
+        eprintln!("[CoolView X11] All toplevel XIDs: {:?}", xids);
+
+        let Some(xid) = xid else {
+            eprintln!("[CoolView X11] Could not get XID from GDK");
+            return;
+        };
+
+        eprintln!("[CoolView X11] Got XID from GDK: {}", xid);
+
+        // Now apply XShape input region using x11rb
+        let result = (|| -> anyhow::Result<()> {
+            let (conn, _screen_num) = x11rb::connect(None)?;
+
+            let rect = x11rb::protocol::xproto::Rectangle {
+                x: 0,
+                y: 0,
+                width: 226,
+                height: 65,
+            };
+
+            use x11rb::protocol::shape::ConnectionExt as ShapeExt;
+            conn.shape_rectangles(
+                0u8.into(), // Operation::Set
+                2u8.into(), // Kind::Input
+                0u8.into(), // ClipOrdering::Unsorted
+                xid as u32,
+                0,
+                0,
+                &[rect],
+            )?.check()?;
+
+            conn.flush()?;
+            eprintln!("[CoolView X11] Input shape set to 226x65 for xid {}", xid);
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            eprintln!("[CoolView X11] XShape failed: {}", e);
+        }
+    });
+}
+
+
+
 // ── Poll loop ─────────────────────────────────────────────────────────────────
 
 fn start_poll_loop(app: AppHandle, state: SharedState) {
@@ -359,6 +427,7 @@ pub fn run() {
         ))
         .setup(|app| {
             let cfg = load_config(app.handle());
+
             let state: SharedState = Arc::new(Mutex::new(AppState {
                 monitor: Monitor::new(),
                 config: cfg.clone(),
@@ -408,6 +477,10 @@ pub fn run() {
 
 
             start_poll_loop(app.handle().clone(), state);
+
+            #[cfg(target_os = "linux")]
+            configure_x11_input_shape(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

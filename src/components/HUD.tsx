@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Config, TempPayload } from "../types";
 import { Sparkline } from "./Sparkline";
 
@@ -43,6 +44,21 @@ function tempColor(c: number | null | undefined): string {
 export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpenHistory }: HUDProps) {
   const [hovered, setHovered] = useState(false);
   const [panelCooldown, setPanelCooldown] = useState(false);
+
+  // Listen for cursor-over-hud events from Rust
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null;
+
+    listen<boolean>("cursor-over-hud", (event) => {
+      setHovered(event.payload);
+    }).then(unlisten => {
+      unlistenFn = unlisten;
+    }).catch(err => console.error("Failed to listen for cursor-over-hud:", err));
+
+    return () => {
+      if (unlistenFn) unlistenFn();
+    };
+  }, []);
 
   function openPanel(fn: () => void) {
     if (panelCooldown) return;
@@ -98,9 +114,8 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
       {/* Temp content — anchored top-right or bottom-right */}
       <div
         style={{
-          position: "absolute",
-          ...(isBottom ? { bottom: 8 } : { top: 8 }),
-          right: 10,
+          position: "relative",
+          margin: 4,
           display: "flex",
           flexDirection: isBottom ? "column-reverse" : "column",
           alignItems: "flex-end",
@@ -122,8 +137,6 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
           padding: "4px 8px",
         }}
         onMouseDown={handleMouseDown}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
       >
         {/* Icon row — top of right content */}
         <div style={{ display: "flex", gap: 4, alignItems: "center", alignSelf: "flex-end" }}>

@@ -1,6 +1,6 @@
 {
   "productName": "CoolView",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "identifier": "com.coolview.app",
   "build": {
     "frontendDist": "../dist",
@@ -13,8 +13,8 @@
       {
         "label": "main",
         "title": "CoolView",
-        "width": 240,
-        "height": 120,
+        "width": 220,
+        "height": 60,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -23,7 +23,9 @@
         "shadow": false,
         "visible": true,
         "x": 1400,
-        "y": 12
+        "y": 12,
+        "minWidth": 220,
+        "minHeight": 60
       }
     ],
     "security": {
