@@ -1,6 +1,6 @@
 {
   "productName": "CoolView",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "identifier": "com.coolview.app",
   "build": {
     "frontendDist": "../dist",
@@ -22,8 +22,6 @@
         "skipTaskbar": false,
         "shadow": false,
         "visible": true,
-        "x": 1400,
-        "y": 12,
         "minWidth": 220,
         "minHeight": 60
       }

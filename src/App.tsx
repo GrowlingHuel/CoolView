@@ -31,6 +31,26 @@ export default function App() {
     invoke<Config>("get_config").then(setConfig).catch(console.error);
   }, []);
 
+  // Position HUD in top-right on first launch, accounting for screen size
+  useEffect(() => {
+    if (view !== "hud") return;
+    async function positionHUD() {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
+        const win = getCurrentWindow();
+        const monitor = await win.currentMonitor();
+        if (!monitor) return;
+        const size = await win.outerSize();
+        const pad = Math.round(12 * monitor.scaleFactor);
+        const x = monitor.size.width - size.width - pad;
+        const y = pad;
+        await win.setPosition(new PhysicalPosition(x, y));
+      } catch (_) {}
+    }
+    positionHUD();
+  }, []);
+
   useEffect(() => {
     async function checkPos() {
       const [mon, pos] = await Promise.all([currentMonitor(), getCurrentWindow().outerPosition()]);

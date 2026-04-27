@@ -216,6 +216,11 @@ fn set_config(
 
 
 #[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn hide_panel(app: AppHandle) {
     let app_h = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -484,7 +489,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_config, set_config, get_history, get_history_path, open_panel, hide_panel
+            get_config, set_config, get_history, get_history_path, open_panel, hide_panel, quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoolView");

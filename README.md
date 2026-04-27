@@ -7,94 +7,101 @@ A lightweight, cross-platform desktop temperature HUD. Sits quietly in the corne
 
 ## Features
 
-- **Frosted-glass HUD** — unobtrusive overlay in the corner of your screen
+- **Floating HUD** — unobtrusive dark pill overlay in the corner of your screen
 - **Sustained warning system** — alerts you only when temps stay high, not on brief spikes
 - **Force-to-top on warning** — you will not miss it
 - **Toggleable sparkline** — mini temperature history graph
-- **Configurable** — thresholds, intervals, sensors, and display all adjustable
+- **24-hour history** — graph and table of recent temps, exportable as CSV
+- **Configurable** — thresholds, intervals, sensors, position and display all adjustable
+- **Click-through** — the transparent area around the HUD doesn't block your desktop
 - **Tiny footprint** — ~10MB binary, minimal CPU/RAM usage
 
 ## Install
 
 ### Linux
 Download the `.deb` or `.tar.gz` from [Releases](../../releases).
+
 ```bash
-sudo dpkg -i coolview_0.1.0_amd64.deb
-# or extract the tarball and run the binary
+sudo dpkg -i coolview_*_amd64.deb
 ```
-**Requires:** `lm-sensors` for full hardware coverage (`sudo apt install lm-sensors && sudo sensors-detect`)
+
+**Requires:** `lm-sensors` for full hardware coverage:
+```bash
+sudo apt install lm-sensors && sudo sensors-detect
+```
+
+> **GPU temperatures** require kernel ≥ 6.12 for Intel integrated graphics, or discrete AMD/Nvidia GPU drivers.
 
 ### macOS
-Download the `.dmg` from [Releases](../../releases).  
-> ⚠️ The app is currently unsigned. macOS will show a Gatekeeper warning. To open: right-click the app → Open → Open anyway.
+Download the `.dmg` from [Releases](../../releases).
 
-Or via Homebrew tap:
-```bash
-brew install yourusername/coolview/coolview
-```
+> ⚠️ The app is unsigned. macOS will show a Gatekeeper warning. To open: right-click → Open → Open anyway.
 
 ### Windows
-Download the `.exe` installer from [Releases](../../releases).  
-> ⚠️ Windows SmartScreen may warn about an unknown publisher. Click "More info" → "Run anyway". This is expected for open-source apps without an EV certificate.
+Download the `.exe` installer from [Releases](../../releases).
+
+> ⚠️ Windows SmartScreen may warn about an unknown publisher. Click "More info" → "Run anyway".
 
 ## Usage
 
-CoolView starts as a small frosted-glass panel in the top-right corner of your screen.
+CoolView starts as a small dark pill in the corner of your screen showing live temperatures.
 
-- **Hover** the panel to reveal the settings gear icon
-- **Click the gear** to open settings
-- **Warning state** triggers when your hottest CPU core stays above the threshold for the configured duration — the panel turns red and forces itself to the front of your screen
+- **Click ≡** to open History (24-hour graph and table)
+- **Click ⚙** to open Settings
+- **Click °C/°F** to toggle temperature units
+- **Drag** the pill to reposition it anywhere on screen
+- **Warning state** triggers when temps stay above your threshold — the pill turns red and forces itself to the front
+- **System tray** — right-click the tray icon to show/hide or quit
 
 ## Configuration
 
-Settings are stored at:
-- **Linux:** `~/.config/coolview/config.toml`
-- **macOS:** `~/Library/Application Support/coolview/config.toml`
-- **Windows:** `%APPDATA%\coolview\config.toml`
+Open Settings (⚙) to configure:
 
-You can edit this file directly:
+| Setting | Description |
+|---------|-------------|
+| Temp threshold | Temperature that triggers a warning (°C) |
+| Duration | How long temps must stay high before warning |
+| Base poll interval | How often to read sensors (adapts automatically when hot) |
+| Always on top | Keep HUD above all other windows |
+| Show sparkline | Mini graph below the temperature readings |
+| Launch at login | Start CoolView automatically on login |
+| Position | Which corner to start in |
+| CPU/GPU/MB | Toggle individual sensors on or off |
 
-```toml
-[display]
-show_sparkline = false
-always_on_top = true
-position = "top-right"   # top-right | top-left | bottom-right | bottom-left
-unit = "C"               # C | F
-
-[thresholds]
-warning_temp = 85
-warning_duration_seconds = 180
-poll_interval_seconds = 30
-
-[monitor]
-cpu = true
-gpu = true
-motherboard = true
-```
-
-Warning events are logged to:
-- **Linux:** `~/.local/share/coolview/logs/warnings.log`
-- **macOS:** `~/Library/Logs/coolview/warnings.log`
-- **Windows:** `%APPDATA%\coolview\logs\warnings.log`
+Config file location:
+- **Linux:** `~/.config/com.coolview.app/config.toml`
+- **macOS:** `~/Library/Application Support/com.coolview.app/config.toml`
+- **Windows:** `%APPDATA%\com.coolview.app\config.toml`
 
 ## Building from Source
 
 **Prerequisites:**
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) 18+
-- Linux only: `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`
+- Linux: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev`
 
 ```bash
-git clone https://github.com/yourusername/coolview
-cd coolview
+git clone https://github.com/HyperArkStudios/CoolView
+cd CoolView
 npm install
 npm run tauri dev     # development
 npm run tauri build   # production build
 ```
 
+**Linux dev note:** Add to `~/.bashrc`:
+```bash
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
+```
+
+## Known Limitations
+
+- **Linux/X11:** Window appears as ~226×228px in alt-tab due to GTK minimum window size. The transparent area is click-through (uses X11 XShape extension).
+- **GPU temp on Linux:** Requires kernel ≥ 6.12 for Intel integrated graphics.
+- **HUD position resets** on restart — drag it to your preferred position after launch.
+
 ## Support the Project
 
-CoolView is free, open source, and always will be. If it's useful to you:
+CoolView is free, open source, and always will be. If it's useful:
 
 - ⭐ Star the repo
 - ☕ [Buy me a coffee](https://ko-fi.com/hyperarkstudios)

@@ -142,6 +142,11 @@ export function HUD({ temps, config, isWarning, isBottom, onOpenSettings, onOpen
         <div style={{ display: "flex", gap: 4, alignItems: "center", alignSelf: "flex-end" }}>
           <button style={iconBtn} onClick={() => openPanel(onOpenHistory)} title="History">≡</button>
           <button style={iconBtn} onClick={() => openPanel(onOpenSettings)} title="Settings">⚙</button>
+          <button
+            style={{ ...iconBtn, opacity: hovered ? 0.5 : 0.15, fontSize: 10 }}
+            onClick={() => invoke("quit_app")}
+            title="Quit CoolView"
+          >✕</button>
         </div>
 
         {/* Warning */}
