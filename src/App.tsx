@@ -36,10 +36,10 @@ export default function App() {
     if (view !== "hud") return;
     async function positionHUD() {
       try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const { getCurrentWindow, currentMonitor } = await import("@tauri-apps/api/window");
         const { PhysicalPosition } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
-        const monitor = await win.currentMonitor();
+        const monitor = await currentMonitor();
         if (!monitor) return;
         const size = await win.outerSize();
         const pad = Math.round(12 * monitor.scaleFactor);
